@@ -72,7 +72,7 @@
         <!-- Run-time stats exposed or not and the interval to update
         the stats. A graphing package is required to display the
         real time stats. It is not yet integrated into Faban. -->
-        <runtimeStats enabled="false">
+        <runtimeStats enabled="true">
             <interval>5</interval>
         </runtimeStats>
 
@@ -87,7 +87,7 @@
                 <interval>30</interval>
             </stats>
             <!-- Port to send the runtime stats. -->
-            <runtimeStats target="9988"/>                 
+            <runtimeStats target="http://0.0.0.0:9950/api/receive_perf"/>                 
             <properties>
                 <!-- Demonstrates the different ways to specify properties -->
                 <!-- The first way is a full name value pair, multiple

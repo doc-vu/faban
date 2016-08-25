@@ -692,7 +692,7 @@ public class ThreadCookieHandler {
             String hostName = request.getHost();
             
             if (hostName == null) {
-                logger.warning("Request " + request + " does not contain a " +
+                logger.fine("Request " + request + " does not contain a " +
                                "hostname or has an invalid hostname.");
             }
 

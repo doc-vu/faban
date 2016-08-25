@@ -32,6 +32,8 @@ import com.sun.faban.driver.util.PairwiseAggregator;
 import com.sun.faban.driver.util.Timer;
 
 import java.io.*;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.rmi.ConnectException;
 import java.rmi.NotBoundException;
 import java.rmi.Remote;
@@ -46,6 +48,10 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.logging.SimpleFormatter;
 
+import javax.json.Json;
+import javax.json.JsonArrayBuilder;
+import javax.json.JsonObjectBuilder;
+
 /**
  * This is the main Master class for running a Faban driver.
  * The Master is instantiated on the <b>master machine</b> by the
@@ -55,8 +61,13 @@ import java.util.logging.SimpleFormatter;
  * NOTE: The registry and agents must have been brought up before
  * starting the driver. The driver will fail otherwise.
  *
+ * Modified to support publishing runtime metrics to a http server
+ * Calls http://<host>:<port>/api/receive_perf and posts json 
+ * 
  * @see        com.sun.faban.driver.engine.Agent
  * @see        com.sun.faban.common.Registry
+ * 
+ * 
  *
  */
 public class MasterImpl extends UnicastRemoteObject implements Master {
@@ -1232,6 +1243,18 @@ public class MasterImpl extends UnicastRemoteObject implements Master {
             RuntimeMetrics[] current = new RuntimeMetrics[agentRefs.length];
             RuntimeMetricsProvider[] providers =
                     new RuntimeMetricsProvider[agentRefs.length];
+            
+            logger.fine(runInfo.toString());
+           
+            URL url = null;
+			try {
+				url = new URL(runInfo.driverConfigs[0].runtimeStatsTarget);
+				
+			} catch (IOException e1) {
+				logger.log(Level.SEVERE, "Error while creating url for runtime server", e1);
+			}
+           
+            
             ArrayList<PairwiseAggregator<RuntimeMetrics>> aggregators =
                     new ArrayList<PairwiseAggregator<RuntimeMetrics>>(
                     agentRefs.length);
@@ -1255,7 +1278,7 @@ public class MasterImpl extends UnicastRemoteObject implements Master {
                                 runInfo.driverConfigs[type].numAgents) {
                             current[type] = 
                                     aggregators.get(type).collectStats();
-                            dumpStats(type, previous, current);
+                            dumpStats(url, type, previous, current);
                             providers[type].reset();
                             previous[type] = current[type];
                             current[type] = null;
@@ -1268,7 +1291,7 @@ public class MasterImpl extends UnicastRemoteObject implements Master {
                                     runInfo.driverConfigs[type].numAgents) {
                                 current[type] =
                                         aggregators.get(type).collectStats();
-                                dumpStats(type, previous, current);
+                                dumpStats(url, type, previous, current);
                                 providers[type].reset();
                                 previous[type] = current[type];
                                 current[type] = null;
@@ -1293,41 +1316,96 @@ public class MasterImpl extends UnicastRemoteObject implements Master {
                             "metrics. Stats writer terminating!", e);
                 }
             }
+            
         }
 
-        void dumpStats(int type, RuntimeMetrics[] previous,
+        void dumpStats(URL url, int type, RuntimeMetrics[] previous,
                                  RuntimeMetrics[] current) {
             // Purchase\Manage\Browse (TxCnt=200\200\400) 90% Resp=0.5\0.6\0.6
             // ^MMfg (TxCnt=200) 90% Resp=2.50
             if (previous[type] == null)
                 return;
+            
+            JsonObjectBuilder  builder = Json.createObjectBuilder()
+            		.add("timestamp", System.currentTimeMillis())
+            		.add("current_interval", Math.round(current[type].timestamp / 1000d))
+            		.add("run_id", runInfo.runId)
+            		.add("scale", runInfo.scale);
+            
+            JsonArrayBuilder operationArray = Json.createArrayBuilder();        
+            
 
             double[][] s = current[type].getResults(runInfo, previous[type]);
             StringBuilder b = new StringBuilder();
             Formatter formatter = new Formatter(b);
 
             formatter.format("%.02f", current[type].timestamp / 1000d);
+            
             b.append("s - ").append(benchDef.drivers[type].name).append(": ");
+            
             b.append(benchDef.drivers[type].operations[0].name);
+            operationArray.add(benchDef.drivers[type].operations[0].name);
+            
+            
             for (int j = 1; j < benchDef.drivers[type].operations.length; j++) {
                 b.append('/');
                 b.append(benchDef.drivers[type].operations[j].name);
+                operationArray.add(benchDef.drivers[type].operations[j].name);
             }
+            
+            builder.add("operations", operationArray);
 
             for (int i = 0; i < s.length; i++) {
                 b.append(' ').append(RuntimeMetrics.LABELS[i]).append('=');
-                if (Double.isNaN(s[i][0]))
-                    b.append('-');
-                else
-                    formatter.format("%.03f", s[i][0]);
+                JsonArrayBuilder runtimeArray = Json.createArrayBuilder();
+                if (Double.isNaN(s[i][0])) {
+                	runtimeArray.add("-");
+                	b.append('-');                	
+                }                    
+                else {
+                	runtimeArray.add(Math.round(s[i][0]*1000)/1000.0);
+                	formatter.format("%.03f", s[i][0]);
+                }
+                    
                 for (int j = 1; j < s[i].length; j++) {
                     b.append('/');
-                    if (Double.isNaN(s[i][j]))
-                        b.append('-');
-                    else
-                        formatter.format("%.03f", s[i][j]);
+                    if (Double.isNaN(s[i][j])) {
+                    	runtimeArray.add("-");
+                    	b.append('-');                    	
+                    }                        
+                    else {
+                    	formatter.format("%.03f", s[i][j]);
+                    	runtimeArray.add(Math.round(s[i][j]*1000)/1000.0);
+                    }
+                        
                 }
+
+                builder.add(RuntimeMetrics.LABELS[i], runtimeArray);
             }
+            
+            try {
+            	
+
+				HttpURLConnection conn = (HttpURLConnection)url.openConnection();
+				conn.setRequestMethod("POST");
+				conn.setDoOutput(true);
+				conn.setRequestProperty("Content-Type", "application/json");
+				conn.setRequestProperty("Connection", "keep-alive");
+            	OutputStreamWriter out = new OutputStreamWriter(conn.getOutputStream());
+				out.write(builder.build().toString());
+				out.flush();				
+				if (conn.getResponseCode() != HttpURLConnection.HTTP_OK) {
+					throw new RuntimeException("Failed : HTTP error code : "
+						+ conn.getResponseCode());
+				}
+				out.close();
+				conn.disconnect();
+			} catch (IOException e) {
+				logger.log(Level.WARNING, "Unable to send metrics to runtime server", e);
+			} catch (RuntimeException e1) {
+				logger.log(Level.WARNING, "Unable to send metrics to runtime server", e1);
+			}
+           
             
             logger.info(b.toString());
         }
@@ -1573,3 +1651,4 @@ public class MasterImpl extends UnicastRemoteObject implements Master {
         }
     }
 }
+
