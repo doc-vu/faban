@@ -118,7 +118,7 @@
             overwrite="true" preservelastmodified="true"
             includeEmptyDirs="true" verbose="true">
             <fileset dir="${workspace.dir}/harness/lib"
-                includes="commons-httpclient-3.1.jar, commons-codec-1.2.jar, commons-logging.jar"/>
+                includes="commons-httpclient-3.1.jar, commons-codec-1.2.jar, commons-logging.jar, javax.json-1.0.4.jar, javax.json-api-1.0.jar"/>
         </copy>
 
         <mkdir dir="logs"/>
