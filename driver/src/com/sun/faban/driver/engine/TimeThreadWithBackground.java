@@ -180,6 +180,10 @@ public class TimeThreadWithBackground extends TimeThread {
                 mixId = 0;
             }
 
+            if(mixOperation[mixId] == -1){
+		logger.warning( "resetting mixOperation[mixId] to 0, mixId:" + mixId );
+		mixOperation[mixId] = 0;	
+	    }
             currentOperation = driverConfig.getOperationIdx(
                     mixId, mixOperation[mixId]);
 
